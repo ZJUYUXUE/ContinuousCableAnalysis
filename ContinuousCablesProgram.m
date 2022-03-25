@@ -10,8 +10,8 @@ function ContinuousCablesProgram
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% input parameters
-FileName = 'Levy1';
-AnalysisType = 0;
+FileName = 'Geiger';
+AnalysisType = 1;
 % 1:definite load path
 % 0:indefinite load path
 FrictionCoefficient = 0.2;
@@ -22,6 +22,7 @@ LoadTable = xlsread(FileName,'Load');
 ContinuousCableSequence = xlsread(FileName,'Continuous');
 % Input structural information via excel file
 % two example(a Levy dome and a Geiger dome) are provided
+% Example : Levy dome with continuous loop cables
 % Sheet "Node":
 %   column 1 :      node numbering
 %   columns 2-4:    nodal coordinates in x-, y-, and z- directions(Unit: m)
@@ -37,7 +38,6 @@ ContinuousCableSequence = xlsread(FileName,'Continuous');
 %   column 1:       external load on corresponding DOF(Unit:kN)
 % Sheet "Continuous":
 %   column 1-2:     continuous segments
-
 
 ElementNumber = size(ElementTable,1);
 % Number of elements
@@ -259,7 +259,12 @@ for i = 1 :1 : ElementNumber
     x = [NodeTable(n,2),NodeTable(m,2)];
     y = [NodeTable(n,3),NodeTable(m,3)];
     z = [NodeTable(n,4),NodeTable(m,4)];
-    plot3(x,y,z,'-black','LineWidth',4);
+    if(ElementTable(i,2) == 1)
+        plot3(x,y,z,'-r','LineWidth',3);
+    end
+    if(ElementTable(i,2) == 0)
+        plot3(x,y,z,'-b','LineWidth',1);
+    end
     hold on;
 end
 set(gca,'DataAspectRatio',[1 1 1]);
