@@ -182,10 +182,10 @@ for i = 1 : ContinuousCableNumber
     Element1 = ContinuousCableSequence(i,1);
     Element2 = ContinuousCableSequence(i,2);
     ForceRatio(i) = SegmentForce(Element1)/SegmentForce(Element2);
-    if(ForceRatio(i) > SlidingLimit(i))
+    if(ForceRatio(i) > 1.0001 * SlidingLimit(i))
         SlideTime(i) = (InitialSegmentForce(Element1) - SlidingLimit(i) * InitialSegmentForce(Element2))/(SlidingLimit(i) * DeltaSegmentForce(Element2) - DeltaSegmentForce(Element1));
     end
-    if(ForceRatio(i) < 1/SlidingLimit(i))
+    if(ForceRatio(i) < 0.9999/SlidingLimit(i))
         SlideTime(i) = (InitialSegmentForce(Element1) - 1/SlidingLimit(i) * InitialSegmentForce(Element2))/(1/SlidingLimit(i) * DeltaSegmentForce(Element2) - DeltaSegmentForce(Element1));
     end
 end
@@ -235,17 +235,17 @@ for i = 1 : ContinuousCableNumber
         RowElement1 = find(ContinuousMatrix(:,Element1));
         RowElement2 = find(ContinuousMatrix(:,Element2));
         ContinuousMatrix(RowElement1,:) = ContinuousMatrix(RowElement1,:) + ContinuousMatrix(RowElement2,:);
-        ContinuousMatrix(Element2,:) = 0;
+        ContinuousMatrix(RowElement2,:) = 0;
         ForceRelationMatrix(RowElement1,:) =  ForceRelationMatrix(RowElement1,:) + ForceRelationMatrix(RowElement1,Element1)/ForceRelationMatrix(RowElement2,Element2) * ForceRelationMatrix(Element2,:)/SlidingLimit(i);
-        ForceRelationMatrix(Element2,:) = 0;
+        ForceRelationMatrix(RowElement2,:) = 0;
     end
     if(Index(i) == 0)
         RowElement1 = find(ContinuousMatrix(:,Element1));
         RowElement2 = find(ContinuousMatrix(:,Element2));
         ContinuousMatrix(RowElement1,:) = ContinuousMatrix(RowElement1,:) + ContinuousMatrix(RowElement2,:);
-        ContinuousMatrix(Element2,:) = 0;
+        ContinuousMatrix(RowElement2,:) = 0;
         ForceRelationMatrix(RowElement1,:) = ForceRelationMatrix(RowElement1,:) + ForceRelationMatrix(RowElement1,Element1)/ForceRelationMatrix(RowElement2,Element2) * ForceRelationMatrix(Element2,:) * SlidingLimit(i);
-        ForceRelationMatrix(Element2,:) = 0;
+        ForceRelationMatrix(RowElement2,:) = 0;
     end
 end
 end
