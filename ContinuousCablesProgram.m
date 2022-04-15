@@ -1,4 +1,4 @@
-%% pre-stress adjustment of cable-strut structures using noisy data
+%% Mechanical analysis of frictional continuous cable system considering the infuluence of load path
 function ContinuousCablesProgram
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -10,16 +10,22 @@ function ContinuousCablesProgram
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% input parameters
-FileName = 'Geiger';
+FileName = 'Levy1';
+
 AnalysisType = 1;
 % 1:definite load path
 % 0:indefinite load path
-FrictionCoefficient = 0.2;
 
+% FrictionCoefficient = 0;
+
+% for mm = 1 : 1 : 4
+%     AA =  [0,0.01,0.1,100];
+FrictionCoefficient = 0.1;
 NodeTable = xlsread(FileName,'Node');
 ElementTable = xlsread(FileName,'Element');
 LoadTable = xlsread(FileName,'Load');
 ContinuousCableSequence = xlsread(FileName,'Continuous');
+OutputResult(ElementTable,NodeTable)
 % Input structural information via excel file
 % two example(a Levy dome and a Geiger dome) are provided
 % Example : Levy dome with continuous loop cables
@@ -35,7 +41,7 @@ ContinuousCableSequence = xlsread(FileName,'Continuous');
 %   column 6:       segment initial forces(Unit:kN)
 %   column 7:       segment lengths;
 % Sheet "Load":
-%   column 1:       external load on corresponding DOF(Unit:kN)
+%   column i:       external load on corresponding DOF in the ith load stage(Unit:kN)
 % Sheet "Continuous":
 %   column 1-2:     continuous segments
 
@@ -51,12 +57,13 @@ ElementStiffness = ElementTable(:,3);
 
 C = zeros(ElementNumber,NodeNumber);
 for i = 1 : 1 :ElementNumber
-        C(i,ElementTable(i,4)) = 1;
-        C(i,ElementTable(i,5)) = -1;
+    C(i,ElementTable(i,4)) = 1;
+    C(i,ElementTable(i,5)) = -1;
 end
 % Node connectivity matrix
 
 L = zeros(ElementNumber,ElementNumber);
+L0 = zeros(ElementNumber,ElementNumber);
 dX = zeros(ElementNumber,ElementNumber);
 dY = zeros(ElementNumber,ElementNumber);
 dZ = zeros(ElementNumber,ElementNumber);
@@ -67,6 +74,7 @@ for i = 1 :1 : ElementNumber
     dX(i,i) = NodeTable(n,2)-NodeTable(m,2);
     dY(i,i) = NodeTable(n,3)-NodeTable(m,3);
     dZ(i,i) = NodeTable(n,4)-NodeTable(m,4);
+    L0(i,i) = L(i,i)/(1+ElementTable(i,6)/ElementStiffness(i));
 end
 D0 = [C'* dX/L;
     C'* dY /L;
@@ -77,55 +85,100 @@ ZERO = diag([NodeTable(:,5);
 ZERO (all(ZERO == 0, 2),:) = [];
 D = ZERO * D0;
 % Equilibrium matrix
-
-K_e = diag(diag(ElementStiffness)/L);
+K_e = diag(diag(ElementStiffness)/L0);
 % Segmenet stiffness vector
-
 SegmentPrestress = ElementTable(:,6);
-InitialElongations = diag(K_e)^(-1) * SegmentPrestress;
+InitialElongations = L0 * diag(ElementStiffness)^(-1) * SegmentPrestress;
+InitialElongations1 = InitialElongations;
 
 SlidingLimit = GetSlidingLimit(NodeTable,ElementTable,ContinuousCableSequence,FrictionCoefficient);
 % Compute sliding limits of the continuous segment force ratios
+NodeTable1 = NodeTable;
 
-%% compute structural responses when the load is continuously changed
+%% compute structural response ranges when the load path is definite
+
 if (AnalysisType == 1)
-    ContinuousMatrix = eye(size(K_e,1));
-    ForceRelationMatrix = eye(size(K_e,1));
-    % Initialize the segment connectivity matrix and the segment force relation matrix
+    LoadStageNumber = size(LoadTable,2);
     SegmentForce(:,1) = SegmentPrestress;
-    % Initalize the segment forces
-    for k = 1 : 1 : size(ContinuousCableSequence,1) + 2
-        K_E = D * ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * D';
-        % Linear stiffness matrix
-        RedistributionForce = ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * InitialElongations;
-        % Redistributed forces caused by the change of nodal slide state
-        Q = L^(-1) * diag(RedistributionForce);
-        G = C'* Q * C;
-        K_G0 = zeros(3 * NodeNumber,3 * NodeNumber);
-        K_G0(1:NodeNumber,1:NodeNumber) = G;
-        K_G0(NodeNumber + 1:2 * NodeNumber,NodeNumber + 1:2 * NodeNumber) = G;
-        K_G0(2 * NodeNumber + 1:3 * NodeNumber,2 * NodeNumber + 1:3 * NodeNumber) = G;
-        K_G = ZERO * K_G0* ZERO';
-        % Geometrical stiffness matrix
-        K_F = D * (RedistributionForce - SegmentPrestress);
-        % Unbalanced force caused by the redistribution of the intial forces
-        NodalDisplacment(:,k) = (K_E+K_G)^(-1) * (LoadTable - K_F);
-        % Nodal displacment solved in current iteration
-        SegmentForce(:,k+1) = ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * (D' * NodalDisplacment(:,k) + InitialElongations);
-        IsSlide(SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit)
-        if (IsSlide(SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit))
-            [ContinuousMatrix,ForceRelationMatrix] = GetMaxtrix(SegmentPrestress,SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit,ContinuousMatrix,ForceRelationMatrix);
-            % Update the segment connectivity matrix and the segment force relation matrix
+    DisplacementInCurrentStage = zeros(3*UnfixedNodeNumber,1);
+    for c = 1 : 1 : LoadStageNumber
+        NodeTable(1:UnfixedNodeNumber,2) = NodeTable1(1:UnfixedNodeNumber,2) + DisplacementInCurrentStage(1:UnfixedNodeNumber);
+        NodeTable(1:UnfixedNodeNumber,3) = NodeTable1(1:UnfixedNodeNumber,3) + DisplacementInCurrentStage(UnfixedNodeNumber + 1 : 2 * UnfixedNodeNumber);
+        NodeTable(1:UnfixedNodeNumber,4) = NodeTable1(1:UnfixedNodeNumber,4) + DisplacementInCurrentStage(2 * UnfixedNodeNumber + 1 : 3 * UnfixedNodeNumber);
+        L = zeros(ElementNumber,ElementNumber);
+        dX = zeros(ElementNumber,ElementNumber);
+        dY = zeros(ElementNumber,ElementNumber);
+        dZ = zeros(ElementNumber,ElementNumber);
+        for i = 1 :1 : ElementNumber
+            n = ElementTable(i,4);
+            m = ElementTable(i,5);
+            L(i,i) = LEN(NodeTable(n,2),NodeTable(n,3),NodeTable(n,4),NodeTable(m,2),NodeTable(m,3),NodeTable(m,4));
+            dX(i,i) = NodeTable(n,2)-NodeTable(m,2);
+            dY(i,i) = NodeTable(n,3)-NodeTable(m,3);
+            dZ(i,i) = NodeTable(n,4)-NodeTable(m,4);
+            L0(i,i) = L(i,i)/(1+ElementTable(i,6)/ElementStiffness(i));
         end
-        if (~IsSlide(SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit))
-            break;
+        D0 = [C'* dX/L;
+            C'* dY /L;
+            C'* dZ /L];
+        ZERO = diag([NodeTable(:,5);
+            NodeTable(:,5);
+            NodeTable(:,5)]);
+        ZERO (all(ZERO == 0, 2),:) = [];
+        D = ZERO * D0;
+        if (c == 1)
+            UnbalancedForce(:,c) = D * ElementTable(:,6);
         end
-        % Segment force solved in current iteration
+        if (c > 1)
+            UnbalancedForce(:,c) = D * ElementTable(:,6) - sum(LoadTable(:,1:c-1),2);
+        end
+        K_e = diag(diag(ElementStiffness)/L0);
+        InitialElongations = L0 * diag(ElementStiffness)^(-1) * SegmentPrestress;
+        ResidualError(c) = norm(UnbalancedForce(:,c))/(3*UnfixedNodeNumber);
+        LoadinCurrentStage = - UnbalancedForce(:,c) + LoadTable(:,c);
+        ContinuousMatrix = eye(size(K_e,1));
+        ForceRelationMatrix = eye(size(K_e,1));
+        SegmentForce = zeros(ElementNumber,size(ContinuousCableSequence,1) + 2);
+        for k = 1 : 1 : size(ContinuousCableSequence,1) + 2
+            K_E = D * ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * D';
+            RedistributionForce = ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * InitialElongations;
+            Q = L^(-1) * diag(RedistributionForce);
+            G = C'* Q * C;
+            K_G0 = zeros(3 * NodeNumber,3 * NodeNumber);
+            K_G0(1:NodeNumber,1:NodeNumber) = G;
+            K_G0(NodeNumber + 1:2 * NodeNumber,NodeNumber + 1:2 * NodeNumber) = G;
+            K_G0(2 * NodeNumber + 1:3 * NodeNumber,2 * NodeNumber + 1:3 * NodeNumber) = G;
+            K_G = ZERO * K_G0* ZERO';
+            K_F = D * (RedistributionForce - SegmentPrestress);
+            NodalDisplacment(:,k) = (K_E+K_G)^(-1) * (LoadinCurrentStage - K_F);
+            SegmentForce(:,k+1) = ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * (D' * NodalDisplacment(:,k) + InitialElongations);
+            IsSlide(SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit)
+            if (IsSlide(SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit))
+                [ContinuousMatrix,ForceRelationMatrix] = GetMaxtrix(SegmentPrestress,SegmentForce(:,k+1),ContinuousCableSequence,SlidingLimit,ContinuousMatrix,ForceRelationMatrix);
+            end
+        end
+        DisplacementInCurrentStage = DisplacementInCurrentStage + NodalDisplacment(:,k);
+        ElementTable(:,6) = SegmentForce(:,k+1);
+        force(:,c) = SegmentForce(:,k+1);
+        dis(:,c) = DisplacementInCurrentStage;
+        disn(c) = norm(NodalDisplacment(:,k));
+        SegmentPrestress = ElementTable(:,6);
+        SlidingLength(:,c) = D'* NodalDisplacment(:,k) - diag(K_e)^(-1) * ElementTable(:,6) + InitialElongations;
+        %     InitialElongations = diag(K_e)^(-1) * SegmentPrestress;
+        TotalSlidingLength(:,c) = sum(SlidingLength,2);
+        AllSlidingLimit(:,c) = SlidingLimit;
     end
-PlotResponse(NodalDisplacment(:,k),SegmentForce(:,k+1),ElementNumber,UnfixedNodeNumber);
+    % figure;plot(ResidualError);
+    % residual errors
+    PlotResponse(DisplacementInCurrentStage,force(:,c),ElementNumber,UnfixedNodeNumber);
+%     OutputResult(ElementTable,NodeTable);
+%     PlotSlidingStage(TotalSlidingLength,force,ElementTable,ContinuousCableSequence,AllSlidingLimit);
+%     plot sliding-induced length of continuous segments
 end
+
 %% compute structural response ranges when the load path is indefinite
 if (AnalysisType == 0)
+    FinalLoad = LoadTable(:,LoadStageNumber);
     ContinuousCableNumber = size(ContinuousCableSequence,1);
     MaxmimalForce = nan(ElementNumber,1);
     MinimalForce = nan(ElementNumber,1);
@@ -148,7 +201,7 @@ if (AnalysisType == 0)
         K_G0(2 * NodeNumber + 1:3 * NodeNumber,2 * NodeNumber + 1:3 * NodeNumber) = G;
         K_G = ZERO * K_G0* ZERO';
         K_F = D * (RedistributionForce - SegmentPrestress);
-        NodalDisplacment = (K_E+K_G)^(-1) * (LoadTable - K_F);
+        NodalDisplacment = (K_E+K_G)^(-1) * (FinalLoad - K_F);
         FinalForce = ForceRelationMatrix' * diag(StiffnessOpterator(ForceRelationMatrix,K_e)) * ContinuousMatrix * (D' * NodalDisplacment + InitialElongations);
         MaxmimalForce = max(MaxmimalForce,FinalForce);
         MinimalForce = min(MinimalForce,FinalForce);
@@ -158,6 +211,31 @@ if (AnalysisType == 0)
     PlotResponseRange(MaxmimalForce,MinimalForce,MaximalDeformation,MinimalDeformation,ElementNumber,UnfixedNodeNumber);
 end
 end
+
+function PlotSlidingStage(TotalSlidingLength,force,ElementTable,ContinuousCableSequence,AllSlidingLimit)
+
+for i = 1 : size(ContinuousCableSequence,1)
+    Element1 = ContinuousCableSequence(i,1);
+    Element2 = ContinuousCableSequence(i,2);
+    ForceElement1 = force(Element1,:);
+    ForceElement2 = force(Element2,:);
+    ForceRatio = diag(ForceElement2)^(-1) * ForceElement1';
+    figure;
+    yyaxis left;
+    plot(TotalSlidingLength(Element1,1:10:size(force,2)),'--^','MarkerSize',8,'MarkerEdgeColor','blue','MarkerFaceColor','blue','LineWidth',1),hold on
+    ylabel('Sliding length(cm)', 'Color','black','fontsize',18,'FontName','Times New Roman');
+    set(gca,'ycolor','black','FontSize',16,'FontName','Times New Roman');
+    yyaxis right;
+    plot(AllSlidingLimit(i,:),'LineWidth',1.5),hold on;
+    plot((AllSlidingLimit(i,:)).^(-1),'LineWidth',1.5),hold on
+    plot(ForceRatio(1:size(force,2)),'--s','MarkerSize',8,'MarkerEdgeColor','red','MarkerFaceColor','red','LineWidth',1);hold on;
+    ylabel('Force ratio', 'Color','black','fontsize',18,'FontName','Times New Roman');
+    set(gca,'ycolor','black','FontSize',16,'FontName','Times New Roman');
+    xlabel('Load(kN)', 'Color','black','fontsize',18,'FontName','Times New Roman');
+    legend('Sliding length','Sliding limit range','Force ratio');
+end
+end
+
 
 function SlidingLimit = GetSlidingLimit(NodeTable,ElementTable,ContinuousCableSequence,FrictionCoefficient)
 ContinuousCableNumber = size(ContinuousCableSequence,1);
@@ -182,32 +260,34 @@ for i = 1 : ContinuousCableNumber
     Element1 = ContinuousCableSequence(i,1);
     Element2 = ContinuousCableSequence(i,2);
     ForceRatio(i) = SegmentForce(Element1)/SegmentForce(Element2);
-    if(ForceRatio(i) > 1.0001 * SlidingLimit(i))
+    if(ForceRatio(i) > 1.000001 * SlidingLimit(i))
         SlideTime(i) = (InitialSegmentForce(Element1) - SlidingLimit(i) * InitialSegmentForce(Element2))/(SlidingLimit(i) * DeltaSegmentForce(Element2) - DeltaSegmentForce(Element1));
     end
-    if(ForceRatio(i) < 0.9999/SlidingLimit(i))
+    if(ForceRatio(i) < 0.999999/SlidingLimit(i))
         SlideTime(i) = (InitialSegmentForce(Element1) - 1/SlidingLimit(i) * InitialSegmentForce(Element2))/(1/SlidingLimit(i) * DeltaSegmentForce(Element2) - DeltaSegmentForce(Element1));
     end
 end
     [~,SlidingElement] = min(SlideTime);
-    min(SlideTime)
-    Element1 = ContinuousCableSequence(SlidingElement,1);
-    Element2 = ContinuousCableSequence(SlidingElement,2);
-    if(ForceRatio(SlidingElement) > 1)
-        RowElement1 = find(ContinuousMatrix(:,Element1));
-        RowElement2 = find(ContinuousMatrix(:,Element2));
-        ContinuousMatrix(RowElement1,:) = ContinuousMatrix(RowElement1,:) + ContinuousMatrix(RowElement2,:);
-        ContinuousMatrix(Element2,:) = 0;
-        ForceRelationMatrix(RowElement1,:) =  ForceRelationMatrix(RowElement1,:) + ForceRelationMatrix(RowElement1,Element1)/ForceRelationMatrix(RowElement2,Element2) * ForceRelationMatrix(Element2,:)/SlidingLimit(SlidingElement);
-        ForceRelationMatrix(RowElement2,:) = 0;
-    end
-    if(ForceRatio(SlidingElement) < 1)
-        RowElement1 = find(ContinuousMatrix(:,Element1));
-        RowElement2 = find(ContinuousMatrix(:,Element2));
-        ContinuousMatrix(RowElement1,:) = ContinuousMatrix(RowElement1,:) + ContinuousMatrix(RowElement2,:);
-        ContinuousMatrix(Element2,:) = 0;
-        ForceRelationMatrix(RowElement1,:) = ForceRelationMatrix(RowElement1,:) + ForceRelationMatrix(RowElement1,Element1)/ForceRelationMatrix(RowElement2,Element2) * ForceRelationMatrix(Element2,:) * SlidingLimit(SlidingElement);
-        ForceRelationMatrix(RowElement2,:) = 0;
+    disp(min(SlideTime))
+    if (min(SlideTime)<1)
+        Element1 = ContinuousCableSequence(SlidingElement,1);
+        Element2 = ContinuousCableSequence(SlidingElement,2);
+        if(ForceRatio(SlidingElement) > 1)
+            RowElement1 = find(ContinuousMatrix(:,Element1));
+            RowElement2 = find(ContinuousMatrix(:,Element2));
+            ContinuousMatrix(RowElement1,:) = ContinuousMatrix(RowElement1,:) + ContinuousMatrix(RowElement2,:);
+            ContinuousMatrix(RowElement2,:) = 0;
+            ForceRelationMatrix(RowElement1,:) =  ForceRelationMatrix(RowElement1,:) + ForceRelationMatrix(RowElement1,Element1)/ForceRelationMatrix(RowElement2,Element2) * ForceRelationMatrix(Element2,:)/SlidingLimit(SlidingElement);
+            ForceRelationMatrix(RowElement2,:) = 0;
+        end
+        if(ForceRatio(SlidingElement) < 1)
+            RowElement1 = find(ContinuousMatrix(:,Element1));
+            RowElement2 = find(ContinuousMatrix(:,Element2));
+            ContinuousMatrix(RowElement1,:) = ContinuousMatrix(RowElement1,:) + ContinuousMatrix(RowElement2,:);
+            ContinuousMatrix(RowElement2,:) = 0;
+            ForceRelationMatrix(RowElement1,:) = ForceRelationMatrix(RowElement1,:) + ForceRelationMatrix(RowElement1,Element1)/ForceRelationMatrix(RowElement2,Element2) * ForceRelationMatrix(Element2,:) * SlidingLimit(SlidingElement);
+            ForceRelationMatrix(RowElement2,:) = 0;
+        end
     end
 end
 
@@ -252,7 +332,8 @@ end
 
 function OutputResult(ElementTable,NodeTable)
 ElementNumber = size(ElementTable,1);
-figure(1); clf;
+NodeNumber = size(NodeTable,1);
+figure(1); hold on;
 for i = 1 :1 : ElementNumber
     n = ElementTable(i,4);
     m = ElementTable(i,5);
@@ -269,6 +350,9 @@ for i = 1 :1 : ElementNumber
 end
 set(gca,'DataAspectRatio',[1 1 1]);
 axis on
+for i = 1 : 1 : NodeNumber
+    text(NodeTable(i,2),NodeTable(i,3),NodeTable(i,4),num2str(i));
+end
 end
 
 function result = LEN(a,b,c,d,e,f)
@@ -305,7 +389,7 @@ end
 function PlotResponse(Displacement,FinalForce,ElementNumber,UnfixedNodeNumber)
 figure;
 set(gcf,'position',[597,500,800,300])
-plot(1:UnfixedNodeNumber,Displacement(2*UnfixedNodeNumber+1:3*UnfixedNodeNumber),'--s','MarkerSize',8,'MarkerEdgeColor','red','MarkerFaceColor','red','LineWidth',1.5);
+plot(1:UnfixedNodeNumber,Displacement(2 * UnfixedNodeNumber+1:3 * UnfixedNodeNumber),'--s','MarkerSize',8,'MarkerEdgeColor','red','MarkerFaceColor','red','LineWidth',1.5);
 set(gca,'FontSize',16,'FontName','Times New Roman');
 xlabel('Node number', 'Color','black','fontsize',18,'FontName','Times New Roman');
 ylabel('Displacment(m)', 'Color','black','fontsize',18,'FontName','Times New Roman');
